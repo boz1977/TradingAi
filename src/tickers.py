@@ -1,0 +1,39 @@
+FTSE_MIB_TICKERS_TEST = [
+    "ENI.MI", 
+    "ENEL.MI",
+    "ISP.MI"
+]
+
+FTSE_MIB_TICKERS = [
+    "A2A.MI",
+    "AMP.MI",
+    "AZM.MI",
+    "BAMI.MI",
+    "BMED.MI",
+    "BPE.MI",
+    "CPR.MI",
+    "DIA.MI",
+    "ENEL.MI",
+    "ENI.MI",
+    "ERG.MI",
+    "FBK.MI",
+    "G.MI",
+    "HER.MI",
+    "IG.MI",
+    "INW.MI",
+    "ISP.MI",
+    "LDO.MI",
+    "MB.MI",
+    "MONC.MI",
+    "NEXI.MI",
+    "PIRC.MI",
+    "PRY.MI",
+    "PST.MI",
+    "REC.MI",
+    "SRG.MI",
+    "STLAM.MI",
+    "TEN.MI",
+    "TRN.MI",
+    "UCG.MI",
+    "UNI.MI"
+]
