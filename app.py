@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 # ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="FTSE MIB Strategy Lab",
-    page_icon="📈",
+    page_icon="[CHART]",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -142,26 +142,35 @@ def fmt_pct(v):
     return f"{'+' if v>=0 else ''}{v:.1f}%"
 
 def run_script(script_name, args="", placeholder=None):
-    """Esegue uno script src/ e mostra output in tempo reale."""
-    cmd = f"python {SRC / script_name} {args}"
+    """Esegue uno script src/ — cattura stdout+stderr, encoding utf-8."""
+    script_path = SRC / script_name
+    cmd = f'python -u "{script_path}" {args}'
     output_lines = []
-    proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, cwd=str(ROOT)
-    )
-    for line in proc.stdout:
-        output_lines.append(line.rstrip())
-        if placeholder:
-            html = "\n".join(output_lines[-60:])
-            placeholder.markdown(f'<div class="log-box">{html}</div>', unsafe_allow_html=True)
-    proc.wait()
-    return "\n".join(output_lines), proc.returncode
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            cwd=str(ROOT)
+        )
+        for line in proc.stdout:
+            clean = line.rstrip()
+            output_lines.append(clean)
+            if placeholder:
+                display = "\n".join(output_lines[-80:])
+                placeholder.code(display, language=None)
+        proc.wait()
+        rc = proc.returncode
+    except Exception as e:
+        output_lines.append(f"[ERRORE AVVIO] {e}")
+        rc = -1
+    return "\n".join(output_lines), rc
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("### 📈 Strategy Lab")
+    st.markdown("### [CHART] Strategy Lab")
     st.markdown('<div class="section-label">FTSE MIB · AI Scoring</div>', unsafe_allow_html=True)
     st.markdown("---")
 
@@ -186,7 +195,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown('<div class="section-label">Aggiornamento rapido</div>', unsafe_allow_html=True)
-    if st.button("▶ Lancia screener ora"):
+    if st.button("Lancia screener ora"):
         with st.spinner("Screener in corso..."):
             out, rc = run_script("daily_screener.py")
         if rc == 0:
@@ -308,7 +317,7 @@ elif page == "📡 Screener":
 
     col_run, col_date, _ = st.columns([2, 2, 4])
     with col_run:
-        run_now = st.button("▶ Esegui screener oggi")
+        run_now = st.button("Esegui screener oggi")
     with col_date:
         replay_date = st.date_input("Oppure replay su data:", value=None)
 
@@ -318,10 +327,9 @@ elif page == "📡 Screener":
         with st.spinner("Screener in corso..."):
             out, rc = run_script("daily_screener.py", args, placeholder=log_ph)
         if rc == 0:
-            st.success("Completato!")
-            st.rerun()
+            st.success("[OK] Screener completato — aggiorna la pagina per vedere i segnali")
         else:
-            st.error("Errore — vedi log sopra")
+            st.error("[ERRORE] — vedi log sopra")
 
     screener_df = load_csv("screener_latest.csv")
     if screener_df.empty:
@@ -430,16 +438,15 @@ elif page == "💼 Portafoglio":
         mpos = col2.number_input("Max posizioni", 1, 10, 3)
         days = col3.number_input("Giorni", 90, 730, 365)
 
-        if st.button("▶ Lancia simulazione"):
+        if st.button("Lancia simulazione"):
             log_ph = st.empty()
             with st.spinner(f"Simulazione {days} giorni in corso..."):
                 args = f"--capital {cap} --max-positions {mpos} --days {days}"
                 out, rc = run_script("portfolio_simulation.py", args, placeholder=log_ph)
             if rc == 0:
-                st.success("Simulazione completata!")
-                st.rerun()
+                st.success("[OK] Simulazione completata — aggiorna la pagina per vedere i risultati")
             else:
-                st.error("Errore — vedi log sopra")
+                st.error("[ERRORE] — vedi log sopra")
 
     # Risultati
     trades_df = load_csv("simulation_trades.csv")
@@ -575,7 +582,7 @@ elif page == "🔧 Parametri":
     cfg["max_positions"]   = col2.number_input("Max posizioni", 1, 10, cfg["max_positions"])
     cfg["rsi_max"]         = col3.slider("RSI entry max", 40, 80, cfg["rsi_max"])
 
-    if st.button("💾 Salva configurazione"):
+    if st.button("Salva configurazione"):
         config_path.write_text(json.dumps(cfg, indent=2))
         st.success(f"Configurazione salvata in `config.json`")
         st.json(cfg)
@@ -589,13 +596,13 @@ elif page == "🚀 Lancia script":
     st.markdown('<div class="section-label">Esegui i componenti della pipeline direttamente dall\'app</div>', unsafe_allow_html=True)
 
     scripts = {
-        "📥 Download prezzi estesi": ("download_prices_extended.py", ""),
-        "📥 Download macro estesi":  ("download_macro_extended.py",  ""),
-        "🔧 Build dataset":          ("build_dataset.py",            ""),
-        "📡 Daily screener":         ("daily_screener.py",           ""),
-        "🤖 Training modello AI":    ("train_model.py",              ""),
-        "🤖 Re-training v2":         ("retrain_model_extended.py",   ""),
-        "💼 Simulazione portafoglio":("portfolio_simulation.py",     "--days 365"),
+        "Download prezzi estesi": ("download_prices_extended.py", ""),
+        "Download macro estesi":  ("download_macro_extended.py",  ""),
+        "Build dataset":          ("build_dataset.py",            ""),
+        "Daily screener":         ("daily_screener.py",           ""),
+        "Training modello AI":    ("train_model.py",              ""),
+        "Re-training v2":         ("retrain_model_extended.py",   ""),
+        "Simulazione portafoglio":("portfolio_simulation.py",     "--days 365"),
     }
 
     selected = st.selectbox("Scegli script da eseguire", list(scripts.keys()))
@@ -605,18 +612,32 @@ elif page == "🚀 Lancia script":
                                placeholder="es. --days 180 --capital 20000")
 
     col1, col2 = st.columns([2, 6])
-    run_btn = col1.button(f"▶ Esegui")
+    run_btn = col1.button("Esegui")
+
+    if "last_log"    not in st.session_state: st.session_state.last_log    = ""
+    if "last_rc"     not in st.session_state: st.session_state.last_rc     = None
+    if "last_script" not in st.session_state: st.session_state.last_script = ""
 
     if run_btn:
+        st.session_state.last_script = script_file
         log_ph = st.empty()
-        st.markdown(f'<div class="section-label">Output: {script_file}</div>', unsafe_allow_html=True)
+        st.markdown(f"**Output: {script_file}**")
         with st.spinner(f"Eseguendo {script_file}..."):
             out, rc = run_script(script_file, extra_args, placeholder=log_ph)
+        st.session_state.last_log = out
+        st.session_state.last_rc  = rc
         if rc == 0:
-            st.success("✅ Script completato con successo")
+            st.success("[OK] Completato con successo")
         else:
-            st.error(f"❌ Script terminato con errore (codice {rc})")
-        st.rerun()
+            st.error(f"[ERRORE] Codice uscita: {rc} — leggi il log sopra")
+
+    elif st.session_state.last_log:
+        st.markdown(f"**Ultimo output: {st.session_state.last_script}**")
+        if st.session_state.last_rc == 0:
+            st.success("[OK] Completato")
+        elif st.session_state.last_rc is not None:
+            st.error(f"[ERRORE] Codice: {st.session_state.last_rc}")
+        st.code(st.session_state.last_log, language=None)
 
     # Status file di output
     st.markdown("---")
@@ -634,6 +655,6 @@ elif page == "🚀 Lancia script":
         if p.exists():
             size = p.stat().st_size / 1024
             mtime = datetime.fromtimestamp(p.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
-            st.markdown(f"✅ `{fpath}` — {desc} ·  {size:.0f} KB · {mtime}")
+            st.markdown(f"[OK] `{fpath}` — {desc} ·  {size:.0f} KB · {mtime}")
         else:
-            st.markdown(f"⬜ `{fpath}` — {desc}")
+            st.markdown(f"[ ] `{fpath}` — {desc}")
