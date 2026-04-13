@@ -1,0 +1,50 @@
+# ── Dati scaricati (file grandi — rigenerati con gli script) ──────────────
+data/raw/
+data/processed/
+data/charts/
+
+# Tieni solo i file risultato piccoli che vuoi versionare
+# (decommenta le righe sotto se vuoi includerli)
+# !data/processed/screener_latest.csv
+# !data/processed/target_stop_trailing_vix_regime_summary.csv
+# !data/processed/target_stop_trailing_vix_score_summary.csv
+
+# ── Modelli ML (file grandi) ──────────────────────────────────────────────
+models/*.joblib
+models/*.pkl
+
+# Tieni la lista delle feature (piccola, utile per il deploy)
+!models/feature_names.json
+!models/feature_names_v2.json
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Ambienti virtuali ─────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env
+
+# ── Variabili d'ambiente (contengono password!) ───────────────────────────
+.env
+*.env
+secrets.toml
+.streamlit/secrets.toml
+
+# ── OS ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
