@@ -142,9 +142,10 @@ def fmt_pct(v):
     return f"{'+' if v>=0 else ''}{v:.1f}%"
 
 def run_script(script_name, args="", placeholder=None):
-    """Esegue uno script src/ — cattura stdout+stderr, encoding utf-8."""
+    """Esegue uno script src/ — usa sys.executable per garantire stesso ambiente."""
     script_path = SRC / script_name
-    cmd = f'python -u "{script_path}" {args}'
+    # sys.executable = stesso python che sta girando Streamlit (con tutti i pacchetti)
+    cmd = f'"{sys.executable}" -u "{script_path}" {args}'
     output_lines = []
     try:
         proc = subprocess.Popen(
