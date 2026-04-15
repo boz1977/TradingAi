@@ -177,7 +177,9 @@ with st.sidebar:
 
     page = st.radio(
         "Navigazione",
-        ["🏠 Dashboard", "📡 Screener", "⚙️ Backtest", "💼 Portafoglio", "🔧 Parametri", "🚀 Lancia script"],
+        ["🏠 Dashboard", "📡 Screener", "📋 Storico segnali",
+         "⚙️ Backtest", "💼 Portafoglio", "🔬 Ottimizzatore",
+         "🔔 Alert", "🔧 Parametri", "🚀 Lancia script"],
         label_visibility="collapsed"
     )
 
@@ -659,3 +661,337 @@ elif page == "🚀 Lancia script":
             st.markdown(f"[OK] `{fpath}` — {desc} ·  {size:.0f} KB · {mtime}")
         else:
             st.markdown(f"[ ] `{fpath}` — {desc}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: STORICO SEGNALI
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "📋 Storico segnali":
+    st.markdown("## Storico segnali")
+    st.markdown('<div class="section-label">Tutti i segnali generati con risultato finale</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns([2, 6])
+    if col1.button("Aggiorna risultati"):
+        log_ph = st.empty()
+        with st.spinner("Aggiornamento risultati in corso..."):
+            out, rc = run_script("signal_history.py", "--update", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Risultati aggiornati")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    history_df = load_csv("signal_history.csv")
+    if history_df.empty:
+        st.info("Nessuno storico disponibile. Lo storico si costruisce automaticamente ogni volta che lanci lo screener.")
+        st.stop()
+
+    # KPI
+    closed = history_df[history_df["status"].isin(["win","loss"])]
+    open_s = history_df[history_df["status"] == "open"]
+    wins   = history_df[history_df["status"] == "win"]
+    losses = history_df[history_df["status"] == "loss"]
+
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("Segnali totali",  len(history_df))
+    c2.metric("Aperti",          len(open_s))
+    c3.metric("Chiusi",          len(closed))
+    if not closed.empty:
+        wr = len(wins)/len(closed)*100
+        c4.metric("Win rate storico", f"{wr:.1f}%",
+                  delta="Forte" if history_df[history_df["signal_type"]=="FORTE"]["status"].isin(["win","loss"]).any() else None)
+        avg_ret = closed["net_return_pct"].mean()
+        c5.metric("Rend. medio chiusi", fmt_pct(avg_ret))
+
+    st.markdown("---")
+
+    # Filtri
+    col_f1, col_f2, col_f3 = st.columns(3)
+    status_filter = col_f1.multiselect("Stato", ["open","win","loss","expired"],
+                                        default=["open","win","loss","expired"])
+    sector_filter = col_f2.multiselect("Settore",
+                                        history_df["sector"].dropna().unique().tolist(),
+                                        default=[])
+    signal_filter = col_f3.multiselect("Tipo segnale", ["FORTE","OK"], default=["FORTE","OK"])
+
+    filtered = history_df[history_df["status"].isin(status_filter)]
+    if sector_filter:
+        filtered = filtered[filtered["sector"].isin(sector_filter)]
+    if signal_filter:
+        filtered = filtered[filtered["signal_type"].isin(signal_filter)]
+
+    filtered = filtered.sort_values("signal_date", ascending=False)
+
+    # Tabella
+    def style_status(v):
+        colors = {"win":"#E1F5EE","loss":"#FCEBEB","open":"#E6F1FB","expired":"#f8f8f6"}
+        return f"background-color:{colors.get(v,'')};"
+
+    cols_show = ["signal_date","ticker","sector","signal_type","entry_score",
+                 "ai_prob","entry_price","status","exit_date","exit_price",
+                 "net_return_pct","holding_days","exit_reason"]
+    cols_ok = [c for c in cols_show if c in filtered.columns]
+
+    fmt_dict = {}
+    if "ai_prob" in cols_ok:         fmt_dict["ai_prob"]         = "{:.1%}"
+    if "entry_price" in cols_ok:     fmt_dict["entry_price"]     = "€{:.3f}"
+    if "exit_price" in cols_ok:      fmt_dict["exit_price"]      = "€{:.3f}"
+    if "net_return_pct" in cols_ok:  fmt_dict["net_return_pct"]  = "{:+.2f}%"
+
+    st.dataframe(
+        filtered[cols_ok].style
+            .format(fmt_dict)
+            .applymap(style_status, subset=["status"])
+            .background_gradient(subset=["net_return_pct"] if "net_return_pct" in cols_ok else [], cmap="RdYlGn"),
+        use_container_width=True, height=450
+    )
+
+    # Grafico win rate per ticker
+    if not closed.empty and len(closed) >= 3:
+        st.markdown("---")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown('<div class="section-label">Win rate per ticker (segnali chiusi)</div>', unsafe_allow_html=True)
+            by_ticker = closed.groupby("ticker").agg(
+                n=("status","count"),
+                wins=("status", lambda x: (x=="win").sum())
+            )
+            by_ticker["win_rate"] = by_ticker["wins"]/by_ticker["n"]*100
+            by_ticker = by_ticker[by_ticker["n"] >= 2].sort_values("win_rate")
+            fig = go.Figure(go.Bar(
+                x=by_ticker["win_rate"], y=by_ticker.index, orientation="h",
+                marker_color=["#1D9E75" if v>=50 else "#D85A30" for v in by_ticker["win_rate"]],
+                text=[f"{v:.0f}% ({n})" for v,n in zip(by_ticker["win_rate"],by_ticker["n"])],
+                textposition="outside"
+            ))
+            fig.update_layout(height=280,margin=dict(l=0,r=60,t=0,b=0),
+                              plot_bgcolor="white",paper_bgcolor="white",
+                              xaxis=dict(ticksuffix="%",range=[0,110]),
+                              showlegend=False,font_family="DM Sans")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_b:
+            st.markdown('<div class="section-label">Rendimento per tipo segnale</div>', unsafe_allow_html=True)
+            by_type = closed.groupby("signal_type")["net_return_pct"].agg(["mean","count","std"])
+            fig2 = go.Figure(go.Bar(
+                x=by_type.index, y=by_type["mean"],
+                marker_color=["#1D9E75" if v>=0 else "#D85A30" for v in by_type["mean"]],
+                text=[f"{v:+.1f}%" for v in by_type["mean"]],
+                textposition="outside"
+            ))
+            fig2.update_layout(height=280,margin=dict(l=0,r=0,t=0,b=0),
+                               plot_bgcolor="white",paper_bgcolor="white",
+                               yaxis=dict(ticksuffix="%",gridcolor="#f0f0ee"),
+                               showlegend=False,font_family="DM Sans")
+            st.plotly_chart(fig2, use_container_width=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: OTTIMIZZATORE
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "🔬 Ottimizzatore":
+    st.markdown("## Ottimizzatore parametri")
+    st.markdown('<div class="section-label">Trova i parametri ottimali con grid search sulla simulazione</div>', unsafe_allow_html=True)
+
+    st.info("L'ottimizzatore esegue la simulazione portafoglio su tutte le combinazioni di parametri e trova quella con il miglior risultato. Modalita rapida: ~5-10 min. Modalita completa: ~30-60 min.")
+
+    col1, col2, col3 = st.columns(3)
+    opt_metric = col1.selectbox("Metrica da ottimizzare",
+                                 ["sharpe","profit_factor","total_return","win_rate"],
+                                 index=0)
+    opt_days   = col2.number_input("Giorni simulazione", 90, 730, 365)
+    opt_mode   = col3.radio("Modalita", ["Rapida (64 combo)", "Completa (729 combo)"], index=0)
+    quick_mode = "Rapida" in opt_mode
+
+    metric_map = {"sharpe":"sharpe","profit_factor":"pf",
+                  "total_return":"return","win_rate":"winrate"}
+
+    if st.button("Avvia ottimizzazione"):
+        args = f"--metric {metric_map[opt_metric]} --days {opt_days}"
+        if quick_mode:
+            args += " --quick"
+        log_ph = st.empty()
+        st.markdown(f"**Ottimizzazione in corso... ({opt_mode})**")
+        with st.spinner("Grid search in corso — potrebbe richiedere alcuni minuti..."):
+            out, rc = run_script("optimizer.py", args, placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Ottimizzazione completata")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    # Risultati
+    results_df = load_csv("optimizer_results.csv")
+    best_file  = ROOT / "data" / "processed" / "optimizer_best.json"
+
+    if not results_df.empty:
+        st.markdown("---")
+
+        # Migliori parametri
+        if best_file.exists():
+            best = json.loads(best_file.read_text())
+            st.markdown('<div class="section-label">Parametri ottimali trovati</div>', unsafe_allow_html=True)
+            param_cols = ["stop_loss_pct","take_profit_pct","trailing_stop_pct",
+                          "vix_entry","entry_score_threshold","ai_prob_threshold"]
+            metric_cols = ["sharpe","profit_factor","total_return_pct","win_rate","n_trades","max_drawdown_pct"]
+
+            c1,c2,c3 = st.columns(3)
+            c1.metric("Stop loss",    f"{best.get('stop_loss_pct',0)*100:.0f}%")
+            c1.metric("Take profit",  f"{best.get('take_profit_pct',0)*100:.0f}%")
+            c2.metric("Trailing",     f"{best.get('trailing_stop_pct',0)*100:.0f}%")
+            c2.metric("VIX entry",    f"{best.get('vix_entry',20)}")
+            c3.metric("Score min",    f"{best.get('entry_score_threshold',6)}/9")
+            c3.metric("AI prob min",  f"{best.get('ai_prob_threshold',0.60):.0%}")
+
+            st.markdown("---")
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Sharpe",         f"{best.get('sharpe',0):.2f}")
+            c2.metric("Profit factor",  f"{best.get('profit_factor',0):.2f}")
+            c3.metric("Rendimento",     fmt_pct(best.get('total_return_pct',0)))
+            c4.metric("Max drawdown",   fmt_pct(best.get('max_drawdown_pct',0)))
+
+            if st.button("Applica parametri ottimali alla strategia"):
+                cfg = {
+                    "stop_loss_pct":        best.get("stop_loss_pct", 0.04),
+                    "take_profit_pct":      best.get("take_profit_pct", 0.12),
+                    "trailing_stop_pct":    best.get("trailing_stop_pct", 0.06),
+                    "transaction_cost":     0.0015,
+                    "vix_entry":            int(best.get("vix_entry", 20)),
+                    "vix_exit":             25,
+                    "rsi_max":              62,
+                    "entry_score_threshold":int(best.get("entry_score_threshold", 6)),
+                    "ai_prob_threshold":    best.get("ai_prob_threshold", 0.60),
+                    "max_positions":        3,
+                    "initial_capital":      10000,
+                }
+                (ROOT / "config.json").write_text(json.dumps(cfg, indent=2))
+                st.success("[OK] config.json aggiornato con i parametri ottimali")
+
+        # Tabella completa risultati
+        st.markdown('<div class="section-label">Tutte le combinazioni testate</div>', unsafe_allow_html=True)
+        cols_show = ["stop_loss_pct","take_profit_pct","trailing_stop_pct",
+                     "vix_entry","entry_score_threshold","ai_prob_threshold",
+                     "sharpe","profit_factor","total_return_pct","win_rate","n_trades","max_drawdown_pct"]
+        cols_ok = [c for c in cols_show if c in results_df.columns]
+        st.dataframe(
+            results_df[cols_ok].head(20).style
+                .format({
+                    "stop_loss_pct": "{:.0%}", "take_profit_pct": "{:.0%}",
+                    "trailing_stop_pct": "{:.0%}", "ai_prob_threshold": "{:.0%}",
+                    "sharpe": "{:.3f}", "profit_factor": "{:.3f}",
+                    "total_return_pct": "{:+.1f}%", "win_rate": "{:.1f}%",
+                    "max_drawdown_pct": "{:.1f}%",
+                })
+                .background_gradient(subset=["sharpe"] if "sharpe" in cols_ok else [], cmap="Greens"),
+            use_container_width=True
+        )
+    else:
+        st.info("Nessun risultato di ottimizzazione. Avvia la grid search.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: ALERT
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "🔔 Alert":
+    st.markdown("## Configurazione alert")
+    st.markdown('<div class="section-label">Notifiche email automatiche quando escono segnali forti</div>', unsafe_allow_html=True)
+
+    # Status configurazione email
+    import smtplib
+    email_configured = bool(os.environ.get("GMAIL_APP_PASSWORD",""))
+    if email_configured:
+        st.success("[OK] App Password Gmail configurata — email attive")
+    else:
+        st.warning("[WARN] GMAIL_APP_PASSWORD non configurata. Vai su Streamlit Cloud → Settings → Secrets e aggiungi: GMAIL_APP_PASSWORD = \"xxxx-xxxx-xxxx-xxxx\"")
+
+    st.markdown("---")
+
+    # Test email
+    st.markdown('<div class="section-label">Test notifica</div>', unsafe_allow_html=True)
+    col1, col2 = st.columns([2,6])
+    if col1.button("Invia email di test"):
+        out, rc = run_script("notify_email.py", "--test")
+        if rc == 0:
+            st.success("[OK] Email di test inviata a boz1977@gmail.com")
+        else:
+            st.error(f"[ERRORE] {out[-200:]}")
+
+    st.markdown("---")
+
+    # Configurazione soglie alert
+    st.markdown('<div class="section-label">Soglie per gli alert</div>', unsafe_allow_html=True)
+
+    alert_cfg_file = ROOT / "alert_config.json"
+    alert_defaults = {
+        "min_prob_for_email": 0.65,
+        "only_forte":         False,
+        "max_vix":            20,
+        "send_empty":         False,
+    }
+    alert_cfg = json.loads(alert_cfg_file.read_text()) if alert_cfg_file.exists() else alert_defaults
+
+    col1, col2 = st.columns(2)
+    alert_cfg["min_prob_for_email"] = col1.slider(
+        "AI prob minima per ricevere email", 0.60, 0.85,
+        float(alert_cfg["min_prob_for_email"]), 0.01
+    )
+    alert_cfg["only_forte"] = col2.checkbox(
+        "Invia solo se ci sono segnali FORTE",
+        value=alert_cfg["only_forte"]
+    )
+    alert_cfg["send_empty"] = st.checkbox(
+        "Invia email anche quando non ci sono segnali",
+        value=alert_cfg["send_empty"]
+    )
+
+    if st.button("Salva configurazione alert"):
+        alert_cfg_file.write_text(json.dumps(alert_cfg, indent=2))
+        st.success("[OK] Configurazione alert salvata")
+
+    st.markdown("---")
+
+    # Automazione
+    st.markdown('<div class="section-label">Automazione — scheduler</div>', unsafe_allow_html=True)
+    st.markdown("""
+Per ricevere l'email ogni sera automaticamente **senza aprire l'app**, hai due opzioni:
+
+**Opzione A — Windows Task Scheduler (consigliata per uso locale)**
+""")
+    st.code("""# Nel PowerShell (copia e incolla)
+$action  = New-ScheduledTaskAction -Execute "python" -Argument "src\\daily_screener.py" -WorkingDirectory "C:\\path\\to\\trading-ai"
+$trigger = New-ScheduledTaskTrigger -Daily -At 18:00
+$settings= New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+Register-ScheduledTask -TaskName "FTSE MIB Screener" -Action $action -Trigger $trigger -Settings $settings
+""", language="powershell")
+
+    st.markdown("**Opzione B — GitHub Actions (per Streamlit Cloud, gira anche senza PC acceso)**")
+    st.code("""# .github/workflows/daily_screener.yml
+name: Daily Screener
+on:
+  schedule:
+    - cron: '30 16 * * 1-5'  # 18:30 ora italiana, solo lun-ven
+  workflow_dispatch:           # permette lancio manuale
+
+jobs:
+  screener:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - run: python src/daily_screener.py
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+""", language="yaml")
+    st.info("Con GitHub Actions lo screener gira ogni giorno lavorativo alle 18:30 direttamente su GitHub, ti manda la email, e non richiede che il tuo PC sia acceso.")
+
+    # Ultimo screener
+    screener_df = load_csv("screener_latest.csv")
+    if not screener_df.empty:
+        st.markdown("---")
+        st.markdown('<div class="section-label">Invia l\'ultimo screener ora</div>', unsafe_allow_html=True)
+        if st.button("Invia screener attuale via email"):
+            out, rc = run_script("notify_email.py")
+            if rc == 0:
+                st.success(f"[OK] Email inviata con {len(screener_df)} segnali")
+            else:
+                st.error(f"[ERRORE] {out[-200:]}")

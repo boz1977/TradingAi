@@ -30,7 +30,6 @@ warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from notify_email import send_email
 from tickers import FTSE_MIB_TICKERS
 from universe_selection import select_universe
 from train_model import SECTOR_MAP, score_trade
@@ -343,7 +342,7 @@ def run_screener(
     print(f"  FTSE MIB:       {macro.get('FTSEMIB', 'N/D')}")
 
     if vix and vix >= VIX_MAX:
-        print(f"\n⛔ VIX = {vix:.1f} >= {VIX_MAX} — nessun ingresso oggi")
+        print(f"\n[STOP] VIX = {vix:.1f} >= {VIX_MAX} — nessun ingresso oggi")
         return pd.DataFrame()
 
     # 4. Ticker stats storiche
@@ -429,7 +428,7 @@ def run_screener(
     print(f"{'='*60}")
 
     for _, row in df_signals.iterrows():
-        label = "🟢 FORTE" if row["signal"] == "FORTE" else "🔵 OK   "
+        label = "[FORTE]" if row["signal"] == "FORTE" else "[OK]   "
         print(f"\n{label}  {row['ticker']:<10} {row['sector']:<12}")
         print(f"         Prezzo:    {row['close']}")
         print(f"         AI prob:   {row['ai_prob']:.1%}  |  Score: {row['entry_score']}/9")
@@ -443,11 +442,8 @@ def run_screener(
     out_latest = os.path.join(OUTPUT_DIR, "screener_latest.csv")
     df_signals.to_csv(out_dated,  index=False)
     df_signals.to_csv(out_latest, index=False)
-    print(f"\n✅ Segnali salvati: {out_dated}")
+    print(f"\nSegnali salvati: {out_dated}")
 
-    #from notify_email import send_email
-    #send_email(df_signals, date_str, vix, attach_csv=out_latest)
-    
     return df_signals
 
 
@@ -462,5 +458,23 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    ref_date = datetime.strptime(args.date, "%Y-%m-%d") if args.date else None
-    run_screener(reference_date=ref_date)
+    ref_date   = datetime.strptime(args.date, "%Y-%m-%d") if args.date else None
+    df_signals = run_screener(reference_date=ref_date)
+
+    # Salva nello storico segnali
+    try:
+        from signal_history import record_signals
+        record_signals(df_signals)
+    except Exception as e:
+        print(f"  [WARN] Storico non aggiornato: {e}")
+
+    # Notifica email automatica (commenta se non vuoi l'email)
+    try:
+        from notify_email import send_email
+        if df_signals is not None and not df_signals.empty:
+            vix_val  = df_signals["vix"].iloc[0] if "vix" in df_signals.columns else None
+            date_str = df_signals["date"].iloc[0] if "date" in df_signals.columns else datetime.now().strftime("%d/%m/%Y")
+            latest   = os.path.join(OUTPUT_DIR, "screener_latest.csv")
+            send_email(df_signals, date_str, vix_val, attach_csv=latest)
+    except Exception as e:
+        print(f"  Email non inviata: {e}")

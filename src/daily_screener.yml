@@ -1,0 +1,42 @@
+name: Daily Screener
+
+on:
+  schedule:
+    - cron: '30 16 * * 1-5'   # 18:30 ora italiana (UTC+2), solo lun-ven
+  workflow_dispatch:            # permette lancio manuale dal browser GitHub
+
+jobs:
+  screener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Download dati aggiornati (solo se mancano)
+        run: |
+          if [ ! -f "data/raw/prices_extended.csv" ]; then
+            python src/download_prices_extended.py
+            python src/download_macro_extended.py
+            python src/build_dataset.py
+          fi
+        continue-on-error: true
+
+      - name: Lancia screener
+        run: python src/daily_screener.py
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+
+      - name: Aggiorna storico segnali
+        run: python src/signal_history.py --update
+        continue-on-error: true
