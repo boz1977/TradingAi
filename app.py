@@ -127,6 +127,15 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 DATA = ROOT / "data" / "processed"
 RAW  = ROOT / "data" / "raw"
 
+@st.cache_resource
+def get_db():
+    try:
+        sys.path.insert(0, str(SRC))
+        from database import DB
+        return DB()
+    except Exception:
+        return None
+
 def load_csv(name, folder=DATA):
     p = folder / name
     if p.exists():
@@ -178,8 +187,8 @@ with st.sidebar:
     page = st.radio(
         "Navigazione",
         ["🏠 Dashboard", "📡 Screener", "📋 Storico segnali",
-         "⚙️ Backtest", "💼 Portafoglio", "🔬 Ottimizzatore",
-         "🔔 Alert", "🔧 Parametri", "🚀 Lancia script"],
+         "📅 Earnings", "⚙️ Backtest", "💼 Portafoglio",
+         "🔬 Ottimizzatore", "🔔 Alert", "🔧 Parametri", "🚀 Lancia script"],
         label_visibility="collapsed"
     )
 
@@ -191,10 +200,12 @@ with st.sidebar:
     screen_ok = (DATA / "screener_latest.csv").exists()
     sim_ok    = (DATA / "simulation_trades.csv").exists()
 
-    st.markdown(f"{'✅' if model_ok  else '❌'} Modello AI v2")
-    st.markdown(f"{'✅' if data_ok   else '❌'} Summary backtest")
-    st.markdown(f"{'✅' if screen_ok else '❌'} Screener (ultimo run)")
-    st.markdown(f"{'✅' if sim_ok    else '❌'} Simulazione portafoglio")
+    db_ok = (ROOT / "trading.db").exists()
+    st.markdown(f"{'[OK]' if db_ok     else '[X]'} Database SQLite")
+    st.markdown(f"{'[OK]' if model_ok  else '[X]'} Modello AI v2")
+    st.markdown(f"{'[OK]' if data_ok   else '[X]'} Summary backtest")
+    st.markdown(f"{'[OK]' if screen_ok else '[X]'} Screener (ultimo run)")
+    st.markdown(f"{'[OK]' if sim_ok    else '[X]'} Simulazione portafoglio")
 
     st.markdown("---")
     st.markdown('<div class="section-label">Aggiornamento rapido</div>', unsafe_allow_html=True)
@@ -599,13 +610,16 @@ elif page == "🚀 Lancia script":
     st.markdown('<div class="section-label">Esegui i componenti della pipeline direttamente dall\'app</div>', unsafe_allow_html=True)
 
     scripts = {
-        "Download prezzi estesi": ("download_prices_extended.py", ""),
-        "Download macro estesi":  ("download_macro_extended.py",  ""),
-        "Build dataset":          ("build_dataset.py",            ""),
-        "Daily screener":         ("daily_screener.py",           ""),
-        "Training modello AI":    ("train_model.py",              ""),
-        "Re-training v2":         ("retrain_model_extended.py",   ""),
-        "Simulazione portafoglio":("portfolio_simulation.py",     "--days 365"),
+        "Download prezzi estesi":   ("download_prices_extended.py", ""),
+        "Download macro estesi":    ("download_macro_extended.py",  ""),
+        "Build dataset":            ("build_dataset.py",            ""),
+        "Daily screener":           ("daily_screener.py",           ""),
+        "Training modello AI":      ("train_model.py",              ""),
+        "Re-training v2":           ("retrain_model_extended.py",   ""),
+        "Simulazione portafoglio":  ("portfolio_simulation.py",     "--days 365"),
+        "Setup database SQLite":    ("database.py",                 ""),
+        "Aggiorna earnings":        ("earnings_calendar.py",        ""),
+        "Aggiorna risultati segnali":("signal_history.py",          "--update"),
     }
 
     selected = st.selectbox("Scegli script da eseguire", list(scripts.keys()))
@@ -680,7 +694,17 @@ elif page == "📋 Storico segnali":
         else:
             st.error("[ERRORE] vedi log")
 
-    history_df = load_csv("signal_history.csv")
+    # Usa DB se disponibile, altrimenti fallback su CSV
+    db = get_db()
+    if db:
+        history_df = db.get_signal_history(days_back=365)
+        if history_df.empty:
+            history_df = load_csv("signals.csv")
+    else:
+        history_df = load_csv("signal_history.csv")
+        if history_df.empty:
+            history_df = load_csv("signals.csv")
+
     if history_df.empty:
         st.info("Nessuno storico disponibile. Lo storico si costruisce automaticamente ogni volta che lanci lo screener.")
         st.stop()
@@ -788,6 +812,82 @@ elif page == "📋 Storico segnali":
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGINA: OTTIMIZZATORE
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: EARNINGS CALENDAR
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "📅 Earnings":
+    st.markdown("## Earnings calendar")
+    st.markdown('<div class="section-label">Date risultati trimestrali — evita ingressi rischiosi</div>', unsafe_allow_html=True)
+
+    col1, col2, _ = st.columns([2, 2, 4])
+    if col1.button("Aggiorna calendario"):
+        log_ph = st.empty()
+        with st.spinner("Download earnings in corso..."):
+            out, rc = run_script("earnings_calendar.py", "", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Calendario aggiornato")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    days_ahead = col2.slider("Mostra prossimi N giorni", 7, 60, 30)
+
+    db = get_db()
+    if db is None:
+        st.warning("Database non disponibile. Lancia prima \'Setup database SQLite\'.")
+        st.stop()
+
+    # Prossimi earnings
+    try:
+        from earnings_calendar import get_upcoming_earnings
+        upcoming = get_upcoming_earnings(days_ahead=days_ahead, db=db)
+    except Exception as e:
+        upcoming = pd.DataFrame()
+        st.error(f"Errore: {e}")
+
+    if upcoming.empty:
+        st.info(f"Nessun earnings nei prossimi {days_ahead} giorni — o calendario vuoto. Clicca \'Aggiorna calendario\'.")
+    else:
+        st.markdown(f'<div class="section-label">{len(upcoming)} earnings nei prossimi {days_ahead} giorni</div>', unsafe_allow_html=True)
+
+        for _, row in upcoming.iterrows():
+            days = int(row.get("days_to_earnings", 0))
+            if days <= 3:
+                color = "#FCEBEB"
+                label = "BLOCCO"
+                border = "#A32D2D"
+            elif days <= 7:
+                color = "#FAEEDA"
+                label = "WARN"
+                border = "#BA7517"
+            else:
+                color = "#f8f8f6"
+                label = "OK"
+                border = "#e0e0d8"
+
+            st.markdown(f"""
+            <div style="border:0.5px solid {border};border-left:3px solid {border};
+                        border-radius:8px;padding:10px 16px;margin-bottom:8px;
+                        background:{color};display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <strong>{row['ticker']}</strong>
+                <span style="color:#888;font-size:12px;margin-left:8px">{row.get('period','Q')}</span>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:13px;font-weight:500">{row['report_date']}</div>
+                <div style="font-size:11px;color:#888">tra {days} giorni — <strong>{label}</strong></div>
+              </div>
+            </div>""", unsafe_allow_html=True)
+
+    # Spiegazione logica
+    st.markdown("---")
+    st.markdown('<div class="section-label">Come funziona il filtro earnings</div>', unsafe_allow_html=True)
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("Blocco segnale", "entro 3 giorni", delta="segnale non inviato")
+    col_b.metric("Warning", "entro 7 giorni", delta="segnale con avviso")
+    col_c.metric("Libero", "oltre 7 giorni", delta="nessuna azione")
+    st.caption("Fonte: yfinance calendar API. Le date possono variare — verifica sempre prima di operare.")
+
 elif page == "🔬 Ottimizzatore":
     st.markdown("## Ottimizzatore parametri")
     st.markdown('<div class="section-label">Trova i parametri ottimali con grid search sulla simulazione</div>', unsafe_allow_html=True)
@@ -988,7 +1088,7 @@ jobs:
     screener_df = load_csv("screener_latest.csv")
     if not screener_df.empty:
         st.markdown("---")
-        st.markdown('<div class="section-label">Invia l\'ultimo screener ora</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Invia l'ultimo screener ora</div>', unsafe_allow_html=True)
         if st.button("Invia screener attuale via email"):
             out, rc = run_script("notify_email.py")
             if rc == 0:

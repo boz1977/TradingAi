@@ -34,6 +34,14 @@ from tickers import FTSE_MIB_TICKERS
 from universe_selection import select_universe
 from train_model import SECTOR_MAP, score_trade
 
+# Fase 1: DB e earnings
+try:
+    from database import DB
+    from earnings_calendar import filter_signals_for_earnings, update_earnings_calendar
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
+
 
 # =============================================================================
 # CONFIGURAZIONE
@@ -436,13 +444,33 @@ def run_screener(
         print(f"         Mom 1M: {row['momentum_1m']}%  Mom 3M: {row['momentum_3m']}%")
         print(f"         Dist MA50: {row['dist_ma50_pct']}%  Dist MA200: {row['dist_ma200_pct']}%")
 
-    # 8. Salva
+    # 8. Filtro earnings — blocca segnali se earnings entro 3 giorni
+    if _DB_AVAILABLE:
+        try:
+            db = DB()
+            df_signals = filter_signals_for_earnings(df_signals, db=db)
+            if df_signals.empty:
+                print("\n[STOP] Tutti i segnali bloccati per earnings imminenti.")
+                return pd.DataFrame()
+        except Exception as e:
+            print(f"  [WARN] Filtro earnings non applicato: {e}")
+
+    # 9. Salva su CSV e DB
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     out_dated  = os.path.join(OUTPUT_DIR, f"screener_{today.strftime('%Y%m%d')}.csv")
     out_latest = os.path.join(OUTPUT_DIR, "screener_latest.csv")
     df_signals.to_csv(out_dated,  index=False)
     df_signals.to_csv(out_latest, index=False)
     print(f"\nSegnali salvati: {out_dated}")
+
+    if _DB_AVAILABLE:
+        try:
+            db = DB()
+            db.save_signals(df_signals)
+            db.save_screener_run(df_signals, vix=vix)
+            print(f"[OK] Salvati nel DB: {len(df_signals)} segnali")
+        except Exception as e:
+            print(f"  [WARN] DB non aggiornato: {e}")
 
     return df_signals
 
