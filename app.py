@@ -1093,7 +1093,7 @@ jobs:
     screener_df = load_csv("screener_latest.csv")
     if not screener_df.empty:
         st.markdown("---")
-        st.markdown('<div class="section-label">Invia l'ultimo screener ora</div>', unsafe_allow_html=True)
+        st.markdown("<div class=\"section-label\">Invia l'ultimo screener ora</div>", unsafe_allow_html=True)
         if st.button("Invia screener attuale via email"):
             out, rc = run_script("notify_email.py")
             if rc == 0:
