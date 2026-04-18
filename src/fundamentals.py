@@ -134,13 +134,21 @@ def fetch_all_fundamentals(
     for i, ticker in enumerate(tickers):
         if verbose:
             print(f"  [{i+1}/{len(tickers)}] {ticker}...", end=" ")
+
         data = fetch_fundamentals(ticker)
         results.append(data)
+
         if verbose:
             pe = data.get("pe_trailing")
             dy = data.get("dividend_yield")
-            print(f"PE={pe:.1f if pe else 'N/A'}  DY={dy*100:.1f if dy else 'N/A'}%")
 
+            pe_str = f"{pe:.1f}" if pd.notna(pe) else "N/A"
+            dy_str = f"{dy*100:.1f}%" if pd.notna(dy) else "N/A"
+
+            print(f"PE={pe_str}  DY={dy_str}")
+
+        time.sleep(1)
+            
     df = pd.DataFrame(results)
     df.to_csv(FUND_FILE, index=False)
     if verbose:
