@@ -15,6 +15,13 @@ Utilizzo:
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Fase 2: fondamentali
+try:
+    from fundamentals import filter_universe_by_fundamentals, fetch_all_fundamentals
+    _FUND_AVAILABLE = True
+except ImportError:
+    _FUND_AVAILABLE = False
 import pandas as pd
 import numpy as np
 
@@ -157,8 +164,24 @@ def select_universe(
         print(price_filter.to_string(index=False))
         print(f"\nPassano filtro prezzi: {len(approved_price)}")
 
-    # Intersezione
+    # Intersezione tecnica
     final_tickers = [t for t in approved_bt["ticker"] if t in approved_price]
+
+    # Filtro fondamentale (Fase 2)
+    if _FUND_AVAILABLE and final_tickers:
+        try:
+            fund_filtered = filter_universe_by_fundamentals(
+                final_tickers, min_score=2, verbose=verbose
+            )
+            if fund_filtered:
+                if verbose:
+                    removed = [t for t in final_tickers if t not in fund_filtered]
+                    if removed:
+                        print(f"  Esclusi per fondamentali deboli: {removed}")
+                final_tickers = fund_filtered
+        except Exception as e:
+            if verbose:
+                print(f"  [WARN] Filtro fondamentale saltato: {e}")
 
     if verbose:
         print(f"\n{'='*55}")
@@ -231,4 +254,4 @@ if __name__ == "__main__":
     out_dir = "data/processed"
     os.makedirs(out_dir, exist_ok=True)
     ranked.to_csv(os.path.join(out_dir, "universe_selected.csv"), index=False)
-    print(f"\n✅ Universe salvato in: {out_dir}/universe_selected.csv")
+    print(f"\n[OK] Universe salvato in: {out_dir}/universe_selected.csv")

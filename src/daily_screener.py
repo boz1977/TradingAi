@@ -42,6 +42,14 @@ try:
 except ImportError:
     _DB_AVAILABLE = False
 
+# Fase 2: fondamentali e sentiment
+try:
+    from fundamentals import get_fundamental_features, filter_universe_by_fundamentals
+    from sentiment import get_sentiment_feature, compute_sentiment
+    _FASE2_AVAILABLE = True
+except ImportError:
+    _FASE2_AVAILABLE = False
+
 
 # =============================================================================
 # CONFIGURAZIONE
@@ -305,6 +313,21 @@ def build_ai_features(
         "is_cyclical":          int(sector in ["consumer", "industrials", "energy"]),
     }
 
+    # Fase 2: aggiungi feature fondamentali e sentiment se disponibili
+    if _FASE2_AVAILABLE:
+        try:
+            fund_feats = get_fundamental_features(ticker)
+            features.update(fund_feats)
+        except Exception:
+            pass
+        try:
+            sent_feats = get_sentiment_feature(ticker)
+            features.update(sent_feats)
+        except Exception:
+            pass
+
+    return features
+
 
 # =============================================================================
 # MAIN SCREENER
@@ -443,6 +466,10 @@ def run_screener(
         print(f"         RSI: {row['rsi']}  ADX: {row['adx']}  Vol ratio: {row['volume_ratio']}")
         print(f"         Mom 1M: {row['momentum_1m']}%  Mom 3M: {row['momentum_3m']}%")
         print(f"         Dist MA50: {row['dist_ma50_pct']}%  Dist MA200: {row['dist_ma200_pct']}%")
+        if "sentiment_score" in row and pd.notna(row.get("sentiment_score")):
+            sent = row["sentiment_score"]
+            label = "positivo" if sent > 0.1 else "negativo" if sent < -0.1 else "neutro"
+            print(f"         Sentiment: {sent:+.2f} ({label})")
 
     # 8. Filtro earnings — blocca segnali se earnings entro 3 giorni
     if _DB_AVAILABLE:

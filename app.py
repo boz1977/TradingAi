@@ -187,7 +187,8 @@ with st.sidebar:
     page = st.radio(
         "Navigazione",
         ["🏠 Dashboard", "📡 Screener", "📋 Storico segnali",
-         "📅 Earnings", "⚙️ Backtest", "💼 Portafoglio",
+         "📅 Earnings", "📊 Fondamentali", "💬 Sentiment",
+         "⚙️ Backtest", "💼 Portafoglio",
          "🔬 Ottimizzatore", "🔔 Alert", "🔧 Parametri", "🚀 Lancia script"],
         label_visibility="collapsed"
     )
@@ -620,6 +621,10 @@ elif page == "🚀 Lancia script":
         "Setup database SQLite":    ("database.py",                 ""),
         "Aggiorna earnings":        ("earnings_calendar.py",        ""),
         "Aggiorna risultati segnali":("signal_history.py",          "--update"),
+        "Download fondamentali":      ("fundamentals.py",            "--quick"),
+        "Download fondamentali full": ("fundamentals.py",            ""),
+        "Calcola sentiment":          ("sentiment.py",               "--quick"),
+        "Calcola sentiment full":     ("sentiment.py",               ""),
     }
 
     selected = st.selectbox("Scegli script da eseguire", list(scripts.keys()))
@@ -1088,10 +1093,220 @@ jobs:
     screener_df = load_csv("screener_latest.csv")
     if not screener_df.empty:
         st.markdown("---")
-        st.markdown("""<div class="section-label">Invia l'ultimo screener ora</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Invia l'ultimo screener ora</div>', unsafe_allow_html=True)
         if st.button("Invia screener attuale via email"):
             out, rc = run_script("notify_email.py")
             if rc == 0:
                 st.success(f"[OK] Email inviata con {len(screener_df)} segnali")
             else:
                 st.error(f"[ERRORE] {out[-200:]}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: FONDAMENTALI
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "📊 Fondamentali":
+    st.markdown("## Analisi fondamentale")
+    st.markdown('<div class="section-label">P/E, Dividend Yield, ROE, Debt/Equity — universo italiano espanso</div>', unsafe_allow_html=True)
+
+    col1, col2, _ = st.columns([2, 2, 4])
+    if col1.button("Aggiorna fondamentali (FTSE MIB)"):
+        log_ph = st.empty()
+        with st.spinner("Download fondamentali..."):
+            out, rc = run_script("fundamentals.py", "--quick", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Fondamentali aggiornati")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    if col2.button("Aggiorna tutti (76 titoli, ~5 min)"):
+        log_ph = st.empty()
+        with st.spinner("Download fondamentali estesi..."):
+            out, rc = run_script("fundamentals.py", "", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Fondamentali completi aggiornati")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    fund_df = load_csv("fundamentals.csv")
+    if fund_df.empty:
+        st.info("Nessun dato fondamentale. Clicca \'Aggiorna fondamentali\' per scaricarli.")
+        st.stop()
+
+    # Filtri
+    st.markdown("---")
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    max_pe   = col_f1.slider("P/E massimo",   5, 60, 35)
+    min_dy   = col_f2.slider("Div. yield min %", 0.0, 8.0, 0.0, 0.5)
+    min_roe  = col_f3.slider("ROE min %", -10, 30, 0)
+    segments = col_f4.multiselect("Segmento",
+                                   ["large","mid","small"],
+                                   default=["large","mid"])
+
+    # Applica filtri
+    filt = fund_df.copy()
+    if "pe_trailing" in filt.columns:
+        filt = filt[filt["pe_trailing"].isna() | (filt["pe_trailing"] <= max_pe)]
+    if "dividend_yield" in filt.columns:
+        filt = filt[filt["dividend_yield"].isna() | (filt["dividend_yield"] >= min_dy/100)]
+    if "roe" in filt.columns:
+        filt = filt[filt["roe"].isna() | (filt["roe"] >= min_roe/100)]
+
+    # Grafici
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown('<div class="section-label">P/E ratio per settore</div>', unsafe_allow_html=True)
+        if "pe_trailing" in filt.columns and "sector" in filt.columns:
+            pe_data = filt.dropna(subset=["pe_trailing","sector"])
+            pe_data = pe_data[pe_data["pe_trailing"].between(0, 50)]
+            if not pe_data.empty:
+                fig = px.box(pe_data, x="sector", y="pe_trailing",
+                             color="sector", points="all",
+                             labels={"pe_trailing":"P/E","sector":"Settore"})
+                fig.update_layout(height=300, showlegend=False,
+                                  plot_bgcolor="white", paper_bgcolor="white",
+                                  margin=dict(l=0,r=0,t=0,b=0),
+                                  font_family="DM Sans")
+                st.plotly_chart(fig, use_container_width=True)
+
+    with col_b:
+        st.markdown('<div class="section-label">Dividend yield %</div>', unsafe_allow_html=True)
+        if "dividend_yield" in filt.columns:
+            dy_data = filt.dropna(subset=["dividend_yield","ticker"])
+            dy_data = dy_data[dy_data["dividend_yield"] > 0].nlargest(15, "dividend_yield")
+            if not dy_data.empty:
+                fig2 = go.Figure(go.Bar(
+                    x=dy_data["ticker"],
+                    y=dy_data["dividend_yield"]*100,
+                    marker_color="#1D9E75",
+                    text=[f"{v*100:.1f}%" for v in dy_data["dividend_yield"]],
+                    textposition="outside"
+                ))
+                fig2.update_layout(height=300, plot_bgcolor="white",
+                                   paper_bgcolor="white",
+                                   yaxis=dict(ticksuffix="%"),
+                                   margin=dict(l=0,r=0,t=0,b=50),
+                                   showlegend=False, font_family="DM Sans")
+                st.plotly_chart(fig2, use_container_width=True)
+
+    # Tabella
+    st.markdown('<div class="section-label">Tabella fondamentali</div>', unsafe_allow_html=True)
+    cols_show = ["ticker","sector","pe_trailing","pe_forward","pb_ratio",
+                 "dividend_yield","roe","debt_equity","revenue_growth","beta","market_cap"]
+    cols_ok = [c for c in cols_show if c in filt.columns]
+
+    fmt = {}
+    if "pe_trailing"     in cols_ok: fmt["pe_trailing"]     = "{:.1f}"
+    if "pe_forward"      in cols_ok: fmt["pe_forward"]      = "{:.1f}"
+    if "pb_ratio"        in cols_ok: fmt["pb_ratio"]        = "{:.2f}"
+    if "dividend_yield"  in cols_ok: fmt["dividend_yield"]  = "{:.1%}"
+    if "roe"             in cols_ok: fmt["roe"]             = "{:.1%}"
+    if "revenue_growth"  in cols_ok: fmt["revenue_growth"]  = "{:.1%}"
+    if "market_cap"      in cols_ok: fmt["market_cap"]      = "{:,.0f}"
+
+    st.dataframe(
+        filt[cols_ok].sort_values("pe_trailing").style.format(fmt, na_rep="—")
+            .background_gradient(subset=["roe"] if "roe" in cols_ok else [], cmap="Greens"),
+        use_container_width=True, height=400
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGINA: SENTIMENT
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "💬 Sentiment":
+    st.markdown("## Analisi sentiment news")
+    st.markdown('<div class="section-label">Score sentiment da news finanziarie — keyword-based con decay temporale</div>', unsafe_allow_html=True)
+
+    col1, col2, _ = st.columns([2, 2, 4])
+    if col1.button("Aggiorna sentiment (top 10)"):
+        log_ph = st.empty()
+        with st.spinner("Analisi news in corso..."):
+            out, rc = run_script("sentiment.py", "--quick", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Sentiment aggiornato")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    if col2.button("Aggiorna tutti"):
+        log_ph = st.empty()
+        with st.spinner("Analisi news completa (~3 min)..."):
+            out, rc = run_script("sentiment.py", "", placeholder=log_ph)
+        if rc == 0:
+            st.success("[OK] Sentiment completo aggiornato")
+        else:
+            st.error("[ERRORE] vedi log")
+
+    sent_df = load_csv("sentiment.csv")
+    if sent_df.empty:
+        st.info("Nessun dato sentiment. Clicca \'Aggiorna sentiment\'.")
+        st.stop()
+
+    # KPI
+    pos = (sent_df["signal"] == "positive").sum() if "signal" in sent_df.columns else 0
+    neg = (sent_df["signal"] == "negative").sum() if "signal" in sent_df.columns else 0
+    neu = len(sent_df) - pos - neg
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Titoli analizzati", len(sent_df))
+    c2.metric("Sentiment positivo", pos, delta=f"{pos/len(sent_df)*100:.0f}%")
+    c3.metric("Sentiment negativo", neg, delta=f"-{neg/len(sent_df)*100:.0f}%")
+    c4.metric("Neutri", neu)
+
+    st.markdown("---")
+
+    # Grafico score
+    col_a, col_b = st.columns([3, 2])
+    with col_a:
+        st.markdown('<div class="section-label">Score sentiment per ticker</div>', unsafe_allow_html=True)
+        if "score" in sent_df.columns:
+            plot_df = sent_df.sort_values("score", ascending=True)
+            fig = go.Figure(go.Bar(
+                x=plot_df["score"],
+                y=plot_df["ticker"],
+                orientation="h",
+                marker_color=["#1D9E75" if v > 0.1 else "#D85A30" if v < -0.1 else "#B4B2A9"
+                              for v in plot_df["score"]],
+                text=[f"{v:+.2f}" for v in plot_df["score"]],
+                textposition="outside",
+            ))
+            fig.update_layout(
+                height=max(300, len(plot_df) * 22),
+                plot_bgcolor="white", paper_bgcolor="white",
+                xaxis=dict(range=[-1,1], gridcolor="#f0f0ee"),
+                showlegend=False, margin=dict(l=0,r=60,t=0,b=0),
+                font_family="DM Sans"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_b:
+        st.markdown('<div class="section-label">Distribuzione segnali</div>', unsafe_allow_html=True)
+        if "signal" in sent_df.columns:
+            sig_counts = sent_df["signal"].value_counts()
+            fig2 = go.Figure(go.Pie(
+                labels=sig_counts.index,
+                values=sig_counts.values,
+                marker_colors=["#1D9E75","#B4B2A9","#D85A30"],
+                hole=0.5,
+            ))
+            fig2.update_layout(height=260, paper_bgcolor="white",
+                               showlegend=True, margin=dict(l=0,r=0,t=0,b=0),
+                               font_family="DM Sans")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        st.markdown('<div class="section-label">Tabella</div>', unsafe_allow_html=True)
+        cols_show = ["ticker","score","signal","n_articles","n_positive","n_negative","confidence"]
+        cols_ok = [c for c in cols_show if c in sent_df.columns]
+        st.dataframe(
+            sent_df[cols_ok].sort_values("score", ascending=False)
+                .style.format({
+                    "score":      "{:+.3f}",
+                    "confidence": "{:.0%}",
+                }, na_rep="—")
+                .background_gradient(subset=["score"] if "score" in cols_ok else [], cmap="RdYlGn"),
+            use_container_width=True, height=350
+        )
+
+    st.markdown("---")
+    st.caption("Score sentiment: keyword-based su news yfinance + GDELT. "
+               "Per maggiore precisione configura NEWSAPI_KEY (gratuita su newsapi.org).")
