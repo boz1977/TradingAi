@@ -211,24 +211,35 @@ with tab_oggi:
 
                 label_tag = '<span class="tag tag-green">FORTE</span>' if is_forte else '<span class="tag tag-blue">OK</span>'
 
+                # Costruisci i tag opzionali prima del markdown
+                tags_html = f'<span class="tag tag-gray">Score {score}/9</span>'
+                if rsi and not (isinstance(rsi, float) and np.isnan(rsi)):
+                    tags_html += f'<span class="tag tag-gray">RSI {rsi:.0f}</span>'
+                if mom3m and not (isinstance(mom3m, float) and np.isnan(mom3m)):
+                    tags_html += f'<span class="tag tag-gray">Mom 3M {fmt_pct(mom3m)}</span>'
+                if dist50 and not (isinstance(dist50, float) and np.isnan(dist50)):
+                    tags_html += f'<span class="tag tag-gray">Dist MA50 {fmt_pct(dist50)}</span>'
+                if earn_warn and str(earn_warn) not in ("nan", "None", ""):
+                    tags_html += f'<span class="tag tag-red">Earnings: {earn_warn}</span>'
+
+                ticker_str = row["ticker"]
+                sector_str = row.get("sector", "").capitalize()
+                close_str  = f"{row.get('close', 0):.3f}"
+
                 st.markdown(f"""
                 <div class="signal-box {cls}">
                   <div style="display:flex;justify-content:space-between;align-items:flex-start">
                     <div>
                       {label_tag}
-                      <div class="signal-ticker" style="margin-top:6px">{row["ticker"]}</div>
-                      <div class="signal-sector">{row.get("sector","").capitalize()} &nbsp;·&nbsp; Prezzo €{row.get("close",0):.3f}</div>
+                      <div class="signal-ticker" style="margin-top:6px">{ticker_str}</div>
+                      <div class="signal-sector">{sector_str} &nbsp;&middot;&nbsp; Prezzo &euro;{close_str}</div>
                       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-                        <span class="tag tag-gray">Score {score}/9</span>
-                        {"<span class='tag tag-gray'>RSI "+f"{rsi:.0f}"+"</span>" if rsi and not (isinstance(rsi,float) and np.isnan(rsi)) else ""}
-                        {"<span class='tag tag-gray'>Mom 3M "+fmt_pct(mom3m)+"</span>" if mom3m and not (isinstance(mom3m,float) and np.isnan(mom3m)) else ""}
-                        {"<span class='tag tag-gray'>Dist MA50 "+fmt_pct(dist50)+"</span>" if dist50 and not (isinstance(dist50,float) and np.isnan(dist50)) else ""}
-                        {"<span class='tag tag-red'>Earnings: "+str(earn_warn)+"</span>" if earn_warn and str(earn_warn) != "nan" else ""}
+                        {tags_html}
                       </div>
                     </div>
                     <div style="text-align:right;min-width:80px">
                       <div class="signal-prob">{prob:.0f}%</div>
-                      <div class="signal-label">probabilità AI</div>
+                      <div class="signal-label">probabilit&agrave; AI</div>
                     </div>
                   </div>
                 </div>""", unsafe_allow_html=True)
@@ -400,7 +411,7 @@ with tab_storico:
 
     st.dataframe(
         hist_df[cols_ok].style.format(fmt, na_rep="—")
-            .applymap(color_status, subset=["status"] if "status" in cols_ok else []),
+            .map(color_status, subset=["status"] if "status" in cols_ok else []),
         use_container_width=True, height=380
     )
 
