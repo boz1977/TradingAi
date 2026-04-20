@@ -386,7 +386,7 @@ with tab_portfolio:
 
     c1, c2, c3, c4 = st.columns(4)
     capital  = c1.number_input("Capitale (€)", 1000, 500000, 10000, step=1000)
-    max_pos  = c2.number_input("Max posizioni", 1, 10, 3)
+    max_pos  = c2.number_input("Max posizioni", 1, 10, 3, key="sim_max_pos")
     sim_days = c3.number_input("Giorni", 90, 730, 365)
     c4.write("")
     c4.write("")
@@ -554,7 +554,7 @@ with tab_impostazioni:
     cfg["vix_exit"]              = col5.slider("VIX uscita",       18, 40, cfg["vix_exit"])
     cfg["entry_score_threshold"] = col6.slider("Score minimo",      4,  9, cfg["entry_score_threshold"])
     cfg["ai_prob_threshold"]     = col7.slider("AI prob min %",    50, 80, int(cfg["ai_prob_threshold"]*100))  / 100
-    cfg["max_positions"]         = col8.number_input("Max posizioni", 1, 10, cfg["max_positions"])
+    cfg["max_positions"]         = col8.number_input("Max posizioni", 1, 10, cfg["max_positions"], key="cfg_max_pos")
 
     rr = cfg["take_profit_pct"] / cfg["stop_loss_pct"]
     st.info(f"Risk/Reward: **{rr:.1f}x** — per ogni euro rischiato, ne guadagni in media {rr:.1f} se il trade va bene.")
