@@ -175,7 +175,7 @@ with tab_oggi:
     if run_screener:
         with st.spinner("Analisi in corso..."):
             log_ph = st.empty()
-            out, rc = run("daily_screener.py", placeholder=None)
+            out, rc = run("daily_screener.py")
             log_ph.code(out[-2000:] if len(out) > 2000 else out, language=None)
         if rc == 0:
             st.success("Aggiornamento completato")
