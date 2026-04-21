@@ -382,34 +382,183 @@ with tab_storico:
 # TAB 3 — PORTAFOGLIO
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_portfolio:
-    st.markdown('<div class="section-label">Simulazione portafoglio — ultimi 365 giorni</div>', unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    capital  = c1.number_input("Capitale (€)", 1000, 500000, 10000, step=1000)
-    max_pos  = c2.number_input("Max posizioni", 1, 10, 3, key="sim_max_pos")
-    sim_days = c3.number_input("Giorni", 90, 730, 365)
-    c4.write("")
-    c4.write("")
-    run_sim = c4.button("Avvia simulazione")
+    # Sotto-tab: Reale | Simulazione
+    sub_reale, sub_sim = st.tabs(["💰 Portafoglio reale", "🔬 Simulazione storica"])
 
-    if run_sim:
-        args = f"--capital {capital} --max-positions {max_pos} --days {sim_days}"
-        with st.spinner(f"Simulazione {sim_days} giorni in corso..."):
-            out, rc = run("portfolio_simulation.py", args)
-            st.code(out[-3000:] if len(out) > 3000 else out, language=None)
-        if rc == 0:
-            st.success("Simulazione completata")
-            st.rerun()
+    # ── SUB-TAB: PORTAFOGLIO REALE ──
+    with sub_reale:
+        try:
+            from real_portfolio import RealPortfolio
+            rp = RealPortfolio()
+            _RP_OK = True
+        except Exception as e:
+            st.error(f"Errore caricamento portafoglio: {e}")
+            _RP_OK = False
+
+        if _RP_OK:
+            # Pulsante aggiorna
+            col_upd, col_info = st.columns([2, 6])
+            if col_upd.button("Aggiorna prezzi e alert"):
+                with st.spinner("Aggiornamento posizioni..."):
+                    alerts = rp.update_all()
+                if alerts:
+                    for a in alerts:
+                        st.warning(f"{a['ticker']}: {a['alert']}")
+                else:
+                    st.success("Tutte le posizioni nella norma")
+
+            summary = rp.get_summary()
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Posizioni aperte",   summary.get("n_open",0))
+            c2.metric("Capitale investito", f"€{summary.get('invested_eur',0):,.0f}")
+            c3.metric("P&L aperto",         f"€{summary.get('open_pnl_eur',0):+,.2f}")
+            c4.metric("P&L totale",         f"€{summary.get('total_pnl_eur',0):+,.2f}")
+
+            st.markdown("---")
+
+            # Posizioni aperte
+            open_pos = rp.get_open_positions()
+            st.markdown('<div class="section-label">Posizioni aperte</div>', unsafe_allow_html=True)
+
+            if open_pos.empty:
+                st.info("Nessuna posizione aperta. Usa il form sotto per registrare un ingresso.")
+            else:
+                for _, row in open_pos.iterrows():
+                    pnl_pct   = float(row.get("current_pnl_pct", 0) or 0)
+                    pnl_eur   = float(row.get("current_pnl_eur", 0) or 0)
+                    pnl_color = "#1D9E75" if pnl_pct >= 0 else "#D85A30"
+                    alert_val = row.get("alert")
+                    has_alert = alert_val and str(alert_val) not in ("nan","None","")
+
+                    with st.container():
+                        ca, cb, cc, cd, ce = st.columns([2,2,2,2,2])
+                        ca.markdown(f"**{row['ticker']}**<br><small>{row.get('entry_date','')}</small>", unsafe_allow_html=True)
+                        cb.metric("Prezzo ingresso", f"€{float(row.get('entry_price',0)):.3f}")
+                        cc.metric("Prezzo attuale",  f"€{float(row.get('current_price',0) or 0):.3f}")
+                        cd.metric("P&L", f"€{pnl_eur:+.2f}", delta=f"{pnl_pct:+.1f}%")
+                        ce.metric("Stop loss", f"€{float(row.get('stop_loss_price',0)):.3f}",
+                                  delta="trailing" if row.get("trailing_active") else None)
+
+                        if has_alert:
+                            st.warning(f"**{row['ticker']}** — {alert_val}")
+
+                        # Pulsante chiudi posizione
+                        with st.expander(f"Chiudi posizione {row['ticker']}"):
+                            col_xp, col_xd, col_xr, col_xb = st.columns([2,2,2,1])
+                            xprice = col_xp.number_input("Prezzo uscita", value=float(row.get("current_price",0) or 0),
+                                                          step=0.01, key=f"xp_{row['id']}")
+                            xdate  = col_xd.date_input("Data uscita", value=datetime.now().date(),
+                                                        key=f"xd_{row['id']}")
+                            xreason= col_xr.selectbox("Motivo", ["manuale","stop_loss","trailing_stop","vix_exit","target"],
+                                                       key=f"xr_{row['id']}")
+                            col_xb.write("")
+                            col_xb.write("")
+                            if col_xb.button("Chiudi", key=f"xbtn_{row['id']}"):
+                                result = rp.close_position(row["ticker"], xprice,
+                                                           xdate.strftime("%Y-%m-%d"), xreason,
+                                                           position_id=int(row["id"]))
+                                st.success(f"Posizione chiusa: P&L €{result.get('net_pnl_eur',0):+.2f}")
+                                st.rerun()
+
+            st.markdown("---")
+
+            # Form nuovo ingresso
+            st.markdown('<div class="section-label">Registra nuovo ingresso</div>', unsafe_allow_html=True)
+
+            # Suggerisce i ticker dai segnali recenti
+            screen_df = load("screener_latest.csv")
+            suggested = screen_df["ticker"].tolist() if not screen_df.empty else []
+
+            with st.form("form_open_position"):
+                col1, col2, col3 = st.columns(3)
+                ticker_input = col1.selectbox("Ticker",
+                    options=suggested + ["Altro..."],
+                    index=0 if suggested else 0
+                )
+                if ticker_input == "Altro...":
+                    ticker_input = col1.text_input("Inserisci ticker (es. ENI.MI)")
+
+                entry_price = col2.number_input("Prezzo ingresso €", min_value=0.01, step=0.01)
+                size_eur    = col3.number_input("Importo investito €", min_value=100, value=3000, step=100)
+
+                col4, col5, col6 = st.columns(3)
+                entry_date  = col4.date_input("Data ingresso", value=datetime.now().date())
+                custom_sl   = col5.number_input("Stop loss % personalizzato (0=default)",
+                                                  min_value=0.0, max_value=20.0, value=0.0, step=0.5)
+                notes       = col6.text_input("Note (opzionale)")
+
+                # Recupera ai_prob dal segnale se disponibile
+                ai_prob = None
+                if not screen_df.empty and ticker_input in screen_df["ticker"].values:
+                    ai_prob = float(screen_df[screen_df["ticker"]==ticker_input]["ai_prob"].iloc[0])
+
+                submitted = st.form_submit_button("Registra ingresso")
+                if submitted and ticker_input and entry_price > 0:
+                    sl_pct = custom_sl / 100 if custom_sl > 0 else None
+                    pos_id = rp.open_position(
+                        ticker      = ticker_input,
+                        entry_price = entry_price,
+                        size_eur    = size_eur,
+                        entry_date  = entry_date.strftime("%Y-%m-%d"),
+                        notes       = notes,
+                        ai_prob     = ai_prob,
+                        stop_loss_pct = sl_pct,
+                    )
+                    sl_price = entry_price * (1 - (sl_pct or 0.04))
+                    tp_price = entry_price * 1.12
+                    st.success(f"Posizione aperta! ID={pos_id} | Stop: €{sl_price:.3f} | Target: €{tp_price:.3f}")
+                    st.rerun()
+
+            # Storico chiuse
+            closed_pos = rp.get_closed_positions()
+            if not closed_pos.empty:
+                st.markdown("---")
+                st.markdown('<div class="section-label">Posizioni chiuse</div>', unsafe_allow_html=True)
+                cols_c = ["ticker","entry_date","exit_date","entry_price","exit_price",
+                          "net_pnl_pct","net_pnl_eur","exit_reason","days_open"]
+                cols_ok = [c for c in cols_c if c in closed_pos.columns]
+                fmt_c = {}
+                if "entry_price" in cols_ok:  fmt_c["entry_price"]  = "€{:.3f}"
+                if "exit_price" in cols_ok:   fmt_c["exit_price"]   = "€{:.3f}"
+                if "net_pnl_pct" in cols_ok:  fmt_c["net_pnl_pct"]  = "{:+.2f}%"
+                if "net_pnl_eur" in cols_ok:  fmt_c["net_pnl_eur"]  = "€{:+.0f}"
+                st.dataframe(
+                    closed_pos[cols_ok].style.format(fmt_c, na_rep="—")
+                        .background_gradient(subset=["net_pnl_pct"] if "net_pnl_pct" in cols_ok else [], cmap="RdYlGn"),
+                    use_container_width=True, height=280
+                )
+
+    # ── SUB-TAB: SIMULAZIONE ──
+    with sub_sim:
+        st.markdown('<div class="section-label">Simulazione portafoglio — ultimi 365 giorni</div>', unsafe_allow_html=True)
+
+        c1, c2, c3, c4 = st.columns(4)
+        capital  = c1.number_input("Capitale (€)", 1000, 500000, 10000, step=1000)
+        max_pos  = c2.number_input("Max posizioni", 1, 10, 3, key="sim_max_pos")
+        sim_days = c3.number_input("Giorni", 90, 730, 365)
+        c4.write("")
+        c4.write("")
+        run_sim = c4.button("Avvia simulazione")
+
+        if run_sim:
+            args = f"--capital {capital} --max-positions {max_pos} --days {sim_days}"
+            with st.spinner(f"Simulazione {sim_days} giorni in corso..."):
+                out, rc = run("portfolio_simulation.py", args)
+                st.code(out[-3000:] if len(out) > 3000 else out, language=None)
+            if rc == 0:
+                st.success("Simulazione completata")
+                st.rerun()
+            else:
+                st.error("Errore — vedi log sopra")
+
+        trades_df = load("simulation_trades.csv")
+        daily_df  = load("simulation_daily_values.csv")
+
+        if trades_df.empty:
+            st.info("Nessuna simulazione disponibile. Imposta i parametri e clicca **Avvia simulazione**.")
         else:
-            st.error("Errore — vedi log sopra")
-
-    trades_df = load("simulation_trades.csv")
-    daily_df  = load("simulation_daily_values.csv")
-
-    if trades_df.empty:
-        st.info("Nessuna simulazione disponibile. Imposta i parametri e clicca **Avvia simulazione**.")
-    else:
-        wins   = trades_df[trades_df["net_return_pct"] > 0]
+            wins   = trades_df[trades_df["net_return_pct"] > 0]
         losses = trades_df[trades_df["net_return_pct"] <= 0]
         pf     = wins["net_return_pct"].sum() / abs(losses["net_return_pct"].sum()) if not losses.empty and losses["net_return_pct"].sum() != 0 else 0
         pnl    = trades_df["pnl_eur"].sum() if "pnl_eur" in trades_df.columns else 0
