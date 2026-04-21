@@ -234,17 +234,30 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 # CALCOLO ENTRY SCORE
 # =============================================================================
 def calculate_entry_score(ind: dict, vix: float) -> int:
-    score = 0
-    if ind.get("ma50")  and ind["close"] > ind["ma50"]:                          score += 1
-    if ind.get("ma200") and ind["close"] > ind["ma200"]:                         score += 1
-    if ind.get("ma20")  and ind.get("ma50") and ind["ma20"] > ind["ma50"]:       score += 1
-    if ind.get("ma50_slope") and ind["ma50_slope"] > 0:                          score += 1
-    if ind.get("rsi")   and ind["rsi"] < RSI_MAX:                                score += 1
-    if ind.get("adx")   and ind["adx"] >= 20:                                    score += 1
-    if ind.get("volume_ratio") and ind["volume_ratio"] >= 1.0:                   score += 1
-    if ind.get("momentum_3m") and ind["momentum_3m"] >= 0:                       score += 1
-    if vix and vix < VIX_MAX:                                                    score += 1
-    return score
+    return calculate_entry_score_detail(ind, vix)["score"]
+
+
+def calculate_entry_score_detail(ind: dict, vix: float) -> dict:
+    """Calcola entry score e restituisce anche il dettaglio di ogni criterio."""
+    criteria = [
+        ("Prezzo > MA50",       ind.get("ma50")  and ind["close"] > ind["ma50"]),
+        ("Prezzo > MA200",      ind.get("ma200") and ind["close"] > ind["ma200"]),
+        ("MA20 > MA50",         ind.get("ma20") and ind.get("ma50") and ind["ma20"] > ind["ma50"]),
+        ("MA50 slope >0",       ind.get("ma50_slope") and ind["ma50_slope"] > 0),
+        (f"RSI < {RSI_MAX}",    ind.get("rsi") and ind["rsi"] < RSI_MAX),
+        ("ADX >= 20",           ind.get("adx") and ind["adx"] >= 20),
+        ("Volume > media",      ind.get("volume_ratio") and ind["volume_ratio"] >= 1.0),
+        ("Momentum 3M >= 0",    ind.get("momentum_3m") and ind["momentum_3m"] >= 0),
+        (f"VIX < {VIX_MAX}",   vix and vix < VIX_MAX),
+    ]
+    passed = [(name, bool(ok)) for name, ok in criteria]
+    score  = sum(1 for _, ok in passed if ok)
+    return {
+        "score":   score,
+        "detail":  passed,
+        "passed":  [n for n, ok in passed if ok],
+        "failed":  [n for n, ok in passed if not ok],
+    }
 
 
 # =============================================================================
@@ -427,12 +440,15 @@ def run_screener(
             continue
 
         sector = SECTOR_MAP.get(ticker, "other")
+        score_detail = calculate_entry_score_detail(ind, vix)
         signals.append({
             "ticker":        ticker,
             "sector":        sector,
             "date":          date_str,
             "close":         round(ind["close"], 3),
             "entry_score":   score,
+            "score_passed":  " | ".join(score_detail["passed"]),
+            "score_failed":  " | ".join(score_detail["failed"]),
             "ai_prob":       round(ai_prob, 3),
             "signal":        "FORTE" if ai_prob >= AI_PROB_STRONG else "OK",
             "rsi":           round(ind["rsi"], 1)   if ind.get("rsi")   else None,

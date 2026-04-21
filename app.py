@@ -166,9 +166,12 @@ with tab_oggi:
                 data_run = screen_df["date"].iloc[0] if "date" in screen_df.columns else "—"
                 vix_val  = screen_df["vix"].iloc[0]  if "vix"  in screen_df.columns else None
                 st.markdown(f"**Ultimo aggiornamento:** {data_run}")
-                if vix_val:
-                    vix_color = "tag-green" if vix_val < 16 else "tag-blue" if vix_val < 20 else "tag-red"
-                    st.markdown(f'<span class="tag {vix_color}">VIX {vix_val:.1f}</span>', unsafe_allow_html=True)
+                try:
+                    vv = float(vix_val) if vix_val is not None else None
+                    if vv and vv == vv:  # not nan
+                        vc = "tag-green" if vv < 16 else "tag-blue" if vv < 20 else "tag-red"
+                        st.markdown(f'<span class="tag {vc}">VIX {vv:.1f}</span>', unsafe_allow_html=True)
+                except Exception: pass
             else:
                 st.markdown("Nessun dato — clicca **Aggiorna segnali ora**")
 
@@ -204,6 +207,9 @@ with tab_oggi:
                     earn_warn= row.get("earnings_warning", None)
                     label_tag = '<span class="tag tag-green">FORTE</span>' if is_forte else '<span class="tag tag-blue">OK</span>'
 
+                    # Score con dettaglio criteri
+                    score_passed = str(row.get("score_passed","")).strip()
+                    score_failed = str(row.get("score_failed","")).strip()
                     tags_html = f'<span class="tag tag-gray">Score {score}/9</span>'
                     if rsi and not (isinstance(rsi, float) and np.isnan(rsi)):
                         tags_html += f'<span class="tag tag-gray">RSI {float(rsi):.0f}</span>'
@@ -213,6 +219,11 @@ with tab_oggi:
                         tags_html += f'<span class="tag tag-gray">Dist MA50 {fmt_pct(float(dist50))}</span>'
                     if earn_warn and str(earn_warn) not in ("nan", "None", ""):
                         tags_html += f'<span class="tag tag-red">Earnings: {earn_warn}</span>'
+                    # Criteri passati / non passati
+                    if score_passed and score_passed not in ("nan",""):
+                        tags_html += "<br><small style='color:#1D9E75'>OK: " + score_passed + "</small>"
+                    if score_failed and score_failed not in ("nan",""):
+                        tags_html += "<br><small style='color:#D85A30'>NO: " + score_failed + "</small>"
 
                     ticker_str = str(row["ticker"])
                     sector_str = str(row.get("sector", "")).capitalize()
@@ -629,14 +640,23 @@ with tab_impostazioni:
     dataset_ok = (DATA / "dataset_extended.csv").exists()
     db_ok      = (ROOT / "trading.db").exists()
 
+    RAW = ROOT / "data" / "raw"
+    prices_ok  = (RAW/"prices_extended.csv").exists() or (RAW/"prices.csv").exists() or dataset_ok
+    macro_ok   = (RAW/"macro_extended.csv").exists() or (RAW/"macro.csv").exists()
+    train_ok   = model_ok or (ROOT/"models"/"trade_scorer.joblib").exists()
+    def _earn_ok():
+        try:
+            import sqlite3
+            c = sqlite3.connect(ROOT/"trading.db"); n = c.execute("SELECT COUNT(*) FROM earnings_calendar").fetchone()[0]; c.close(); return n>0
+        except: return False
     steps = [
-        ("Prezzi storici dal 2000",    dataset_ok or (ROOT/"data"/"raw"/"prices_extended.csv").exists(), "download_prices_extended.py", ""),
-        ("Dati macro (VIX, SP500...)", (ROOT/"data"/"raw"/"macro_extended.csv").exists(),                "download_macro_extended.py",  ""),
-        ("Dataset con indicatori",     dataset_ok,                                                        "build_dataset.py",            ""),
-        ("Training modello AI",        model_ok,                                                          "retrain_model_extended.py",   ""),
-        ("Database SQLite",            db_ok,                                                             "database.py",                 ""),
-        ("Earnings calendar",          db_ok,                                                             "earnings_calendar.py",        ""),
-        ("Fondamentali",               (DATA/"fundamentals.csv").exists(),                                "fundamentals.py",             "--quick"),
+        ("Prezzi storici dal 2000",    prices_ok,  "download_prices_extended.py", ""),
+        ("Dati macro (VIX, SP500...)", macro_ok,   "download_macro_extended.py",  ""),
+        ("Dataset con indicatori",     dataset_ok or (DATA/"dataset.csv").exists(), "build_dataset.py", ""),
+        ("Training modello AI",        train_ok,   "retrain_model_extended.py",   ""),
+        ("Database SQLite",            db_ok,      "database.py",                 ""),
+        ("Earnings calendar",          db_ok and _earn_ok(), "earnings_calendar.py", ""),
+        ("Fondamentali",               (DATA/"fundamentals.csv").exists(), "fundamentals.py", "--quick"),
     ]
 
     all_done = all(s[1] for s in steps)
