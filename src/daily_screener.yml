@@ -33,7 +33,7 @@ jobs:
         continue-on-error: true
 
       - name: Lancia screener
-        run: python src/daily_screener.py
+        run: python src/daily_update.py
         env:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
 
