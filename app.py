@@ -133,6 +133,24 @@ def system_ready():
     return model and data
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SINCRONIZZAZIONE DATI — ripristina DB all'avvio da Supabase
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner=False)
+def _init_data():
+    """Chiamato una volta sola per sessione — ripristina i dati da Supabase."""
+    try:
+        from supabase_sync import ensure_data_loaded, is_configured
+        if is_configured():
+            ensure_data_loaded()
+            return True
+    except Exception:
+        pass
+    return False
+
+_init_data()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # NAVIGAZIONE — 4 tab in alto, niente sidebar
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-title">FTSE MIB Strategy Lab</div>', unsafe_allow_html=True)
@@ -562,17 +580,16 @@ with tab_portfolio:
                 st.rerun()
             else:
                 st.error("Errore — vedi log sopra")
-
         trades_df = load("simulation_trades.csv")
         daily_df  = load("simulation_daily_values.csv")
 
-        if trades_df.empty:
-            st.info("Nessuna simulazione disponibile. Imposta i parametri e clicca **Avvia simulazione**.")
+        if trades_df.empty or "net_return_pct" not in trades_df.columns:
+            st.info("Nessuna simulazione disponibile. Avvia la simulazione con i parametri sopra.")
         else:
             wins   = trades_df[trades_df["net_return_pct"] > 0]
-        losses = trades_df[trades_df["net_return_pct"] <= 0]
-        pf     = wins["net_return_pct"].sum() / abs(losses["net_return_pct"].sum()) if not losses.empty and losses["net_return_pct"].sum() != 0 else 0
-        pnl    = trades_df["pnl_eur"].sum() if "pnl_eur" in trades_df.columns else 0
+            losses = trades_df[trades_df["net_return_pct"] <= 0]
+            pf     = wins["net_return_pct"].sum() / abs(losses["net_return_pct"].sum()) if not losses.empty and losses["net_return_pct"].sum() != 0 else 0
+            pnl    = trades_df["pnl_eur"].sum() if "pnl_eur" in trades_df.columns else 0
 
         if not daily_df.empty:
             cap_init = daily_df["total_value"].iloc[0]

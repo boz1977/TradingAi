@@ -10,3 +10,4 @@ ta>=0.10.2
 requests>=2.31.0
 matplotlib>=3.7.0
 shap>=0.44.0
+supabase>=2.0.0

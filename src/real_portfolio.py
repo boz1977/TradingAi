@@ -175,6 +175,14 @@ class RealPortfolio:
         conn.close()
         print(f"[OK] Posizione aperta: {ticker} @ €{entry_price:.3f} | "
               f"Size: €{size_eur:.0f} | Stop: €{sl_price:.3f} | Target: €{tp_price:.3f}")
+
+        # Sync su Supabase
+        try:
+            from supabase_sync import push_to_supabase
+            push_to_supabase(["real_positions","real_transactions"])
+        except Exception:
+            pass
+
         return pos_id
 
     def close_position(
@@ -236,6 +244,14 @@ class RealPortfolio:
 
         print(f"[OK] Posizione chiusa: {ticker} @ €{exit_price:.3f} | "
               f"P&L: €{net_pnl:+.2f} ({net_pct:+.1f}%) | {holding} giorni")
+
+        # Sync su Supabase
+        try:
+            from supabase_sync import push_to_supabase
+            push_to_supabase(["real_positions","real_transactions"])
+        except Exception:
+            pass
+
         return {"ticker": ticker, "net_pnl_eur": net_pnl, "net_pnl_pct": net_pct}
 
     # ─────────────────────────────────────────────────────────────────────────
