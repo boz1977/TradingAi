@@ -582,7 +582,8 @@ with tab_portfolio:
                 st.error("Errore — vedi log sopra")
         trades_df = load("simulation_trades.csv")
         daily_df  = load("simulation_daily_values.csv")
-
+        pf = 0
+        pnl = 0
         if trades_df.empty or "net_return_pct" not in trades_df.columns:
             st.info("Nessuna simulazione disponibile. Avvia la simulazione con i parametri sopra.")
         else:
